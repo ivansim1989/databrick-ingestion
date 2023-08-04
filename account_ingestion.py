@@ -24,7 +24,3 @@ processor.main()
 # COMMAND ----------
 
 dbutils.notebook.exit("Job Ended")
-
-# COMMAND ----------
-
-t
