@@ -6,7 +6,7 @@ trigger:
 - main
 
 pool:
-  name: Hosted Ubuntu latest
+  vmImage: 'ubuntu-latest'
 
 steps:
 - task: UsePythonVersion@0
