@@ -271,4 +271,3 @@ class DataIngestion:
         self.write_parquet(df)
         self.logger.info("Job Done")
 
-
