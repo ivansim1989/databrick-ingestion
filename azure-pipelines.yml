@@ -16,7 +16,7 @@ steps:
 
 - script: |
     pip install pytest requests setuptools wheel
-    pip install -U databricks-connect==6.4.*
+    pip install -U databricks-connect==13.0.*
   displayName: 'Load Python Dependencies'
 
 - script: |
