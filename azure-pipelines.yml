@@ -1,0 +1,66 @@
+# Azure Databricks Build Pipeline
+# azure-pipelines.yml
+#hello
+
+trigger:
+- main
+
+pool:
+  name: Hosted Ubuntu 1604
+
+steps:
+- task: UsePythonVersion@0
+  displayName: 'Use Python 3.7'
+  inputs:
+    versionSpec: 3.7
+
+- script: |
+    pip install pytest requests setuptools wheel
+    pip install -U databricks-connect==6.4.*
+  displayName: 'Load Python Dependencies'
+
+- script: |
+    echo "y
+    $(WORKSPACE-REGION-URL)
+    $(CSE-DEVELOP-PAT)
+    $(EXISTING-CLUSTER-ID)
+    $(WORKSPACE-ORG-ID)
+    15001" | databricks-connect configure
+  displayName: 'Configure DBConnect'
+
+- checkout: self
+  persistCredentials: true
+  clean: true
+
+- script: git checkout main
+  displayName: 'Get Latest Branch'
+
+
+- script: |
+    cd $(Build.Repository.LocalPath)/package
+    python3 setup.py sdist bdist_wheel
+    ls dist/
+  displayName: 'Build Python Wheel for Libs'
+
+- script: |
+    git diff --name-only --diff-filter=AMR HEAD^1 HEAD | xargs -I '{}' cp --parents -r '{}' $(Build.BinariesDirectory)
+
+    mkdir -p $(Build.BinariesDirectory)/package/libs
+    cp $(Build.Repository.LocalPath)/package/dist/*.* $(Build.BinariesDirectory)/package/libs
+
+    mkdir -p $(Build.BinariesDirectory)/cicd-scripts
+    cp $(Build.Repository.LocalPath)/cicd-scripts/*.* $(Build.BinariesDirectory)/cicd-scripts
+
+  displayName: 'Get Changes'
+
+- task: ArchiveFiles@2
+  inputs:
+    rootFolderOrFile: '$(Build.BinariesDirectory)'
+    includeRootFolder: false
+    archiveType: 'zip'
+    archiveFile: '$(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip'
+    replaceExistingArchive: true
+
+- task: PublishBuildArtifacts@1
+  inputs:
+    ArtifactName: 'DatabricksBuild'
