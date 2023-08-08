@@ -272,5 +272,3 @@ class DataIngestion:
         self.logger.info("Job Done")
 
 
-# COMMAND ----------
-
