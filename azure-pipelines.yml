@@ -6,7 +6,7 @@ trigger:
 - main
 
 pool:
-  name: Hosted Ubuntu 2004
+  name: Hosted Ubuntu 22.04
 
 steps:
 - task: UsePythonVersion@0
