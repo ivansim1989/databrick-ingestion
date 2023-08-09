@@ -32,7 +32,7 @@ steps:
   persistCredentials: true
   clean: true
 
-- script: git checkout branch
+- script: git fetch branch
   displayName: 'Get Latest Branch'
 
 
