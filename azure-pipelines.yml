@@ -32,6 +32,12 @@ steps:
   persistCredentials: true
   clean: true
 
+<<<<<<< HEAD
+=======
+- script: git checkout main
+  displayName: 'Get Latest Branch'
+
+>>>>>>> 433c043ec606d75643da65ce1a42af3109ba979f
 
 - script: |
     cd $(Build.Repository.LocalPath)/package
