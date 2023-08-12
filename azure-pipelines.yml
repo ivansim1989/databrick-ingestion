@@ -32,7 +32,6 @@ steps:
   persistCredentials: true
   clean: true
 
-
 - script: |
     cd $(Build.Repository.LocalPath)/package
     python3 setup.py sdist bdist_wheel
