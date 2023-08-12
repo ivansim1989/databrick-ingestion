@@ -2,9 +2,10 @@
 import logging
 import json
 from pyspark.sql.functions import udf, col, input_file_name, lit, current_timestamp, from_utc_timestamp, date_format, substring
-from pyspark.sql.types import StringType, IntegerType, BooleanType, DecimalType, DoubleType, StructType, StructField
+from pyspark.sql.types import StringType, LongType, BooleanType, DecimalType, DoubleType, StructType, StructField, TimestampType
 import pytz
 from datetime import datetime
+from dateutil.parser import parse
 
 # COMMAND ----------
 
@@ -82,7 +83,7 @@ class DataIngestion:
 
         for file_path in file_list:
             year_month = file_path.split("/")[-1].split("_")[0]
-            timestamp = int(file_path.split('_')[2].split('.')[0])
+            timestamp = int(file_path.split("/")[-1].split('_')[1].split('.')[0])
             if year_month not in latest_files_dict or timestamp > latest_files_dict[year_month][0]:
                 latest_files_dict[year_month] = (timestamp, file_path)
 
@@ -121,15 +122,19 @@ class DataIngestion:
             'guid': StringType(),
             'string': StringType(),
             'dateTime': StringType(),
-            'int64': IntegerType(),
+            'int64': LongType(),
             'boolean': BooleanType(),
             'decimal': DecimalType(),
             'dateTimeOffset': StringType(),
             'double': DoubleType()
         }
+    
+        timestamp_list = []
         for field_dict in schema_list:
             field_name = field_dict['name']
             data_type_str = field_dict['dataType']
+            if field_dict['dataType'] in ['dateTime']:
+                timestamp_list.append(field_dict['name'])
 
             spark_type = data_type_mapping.get(data_type_str)
 
@@ -145,7 +150,7 @@ class DataIngestion:
 
         schema = StructType(fields=transformed_fields)
         self.logger.info("Schema output: %s", schema)
-        return schema
+        return schema, timestamp_list
 
     def option_set_metadata(self, df, data_dict):
         """
@@ -156,21 +161,23 @@ class DataIngestion:
         Returns:
             DataFrame: The DataFrame with added option set metadata.
         """
-        broadcast_variables = {
-            f"b_{option_set_name}": spark.sparkContext.broadcast(
-                {item["Option"]: item["LocalizedLabel"] for item in data_dict if item["OptionSetName"] == option_set_name}
-            )
-            for option_set_name in set(item["OptionSetName"] for item in data_dict)
-        }
+        if data_dict is not None and len(data_dict) != 0:
+            broadcast_variables = {
+                f"b_{option_set_name}": spark.sparkContext.broadcast(
+                    {item["Option"]: item["LocalizedLabel"] for item in data_dict if item["OptionSetName"] == option_set_name}
+                )
+                for option_set_name in set(item["OptionSetName"] for item in data_dict)
+            }
 
-        for broadcast_name in broadcast_variables:
-            option_set_name = broadcast_name[2:]
-            udf_function = udf(
-                lambda value: broadcast_variables[broadcast_name].value.get(value),
-                StringType()
-            )
-            df = df.withColumn(f"{option_set_name}name", udf_function(col(option_set_name)))
-            self.logger.info("Field created: %s", f"{option_set_name}name")
+            for broadcast_name in broadcast_variables:
+                option_set_name = broadcast_name[2:]
+                self.logger.info("Field creating: %s", f"{option_set_name}name")
+                udf_function = udf(
+                    lambda value: broadcast_variables[broadcast_name].value.get(value),
+                    StringType()
+                )
+                df = df.withColumn(f"{option_set_name}name", udf_function(col(option_set_name)))
+                self.logger.info("Field created: %s", f"{option_set_name}name")
         return df
 
     def status_metadata(self, df, data_dict):
@@ -182,14 +189,15 @@ class DataIngestion:
         Returns:
             DataFrame: The DataFrame with added status code metadata.
         """
-        status_metadata = {item["Status"]: item["LocalizedLabel"] for item in data_dict}
-        b_status_metadata = spark.sparkContext.broadcast(status_metadata)
-        status_metadata_udf = udf(
-            lambda value: b_status_metadata.value.get(value),
-            StringType()
-        )
-        df = df.withColumn("statuscodename", status_metadata_udf(col("statuscode")))
-        self.logger.info("Field created: statuscodename")
+        if data_dict is not None and len(data_dict) != 0:
+            status_metadata = {item["Status"]: item["LocalizedLabel"] for item in data_dict}
+            b_status_metadata = spark.sparkContext.broadcast(status_metadata)
+            status_metadata_udf = udf(
+                lambda value: b_status_metadata.value.get(value),
+                StringType()
+            )
+            df = df.withColumn("statuscodename", status_metadata_udf(col("statuscode")))
+            self.logger.info("Field created: statuscodename")
         return df
 
     def state_metadata(self, df, data_dict):
@@ -201,15 +209,35 @@ class DataIngestion:
         Returns:
             DataFrame: The DataFrame with added state code metadata.
         """
-        state_metadata = {item["State"]: item["LocalizedLabel"] for item in data_dict}
-        b_state_metadata = spark.sparkContext.broadcast(state_metadata)
-        state_metadata_udf = udf(
-            lambda value: b_state_metadata.value.get(value),
-            StringType()
-        )
-        df = df.withColumn("statecodename", state_metadata_udf(col("statecode")))
-        self.logger.info("Field created: statecodename")
+        if data_dict is not None and len(data_dict) != 0:
+            state_metadata = {item["State"]: item["LocalizedLabel"] for item in data_dict}
+            b_state_metadata = spark.sparkContext.broadcast(state_metadata)
+            state_metadata_udf = udf(
+                lambda value: b_state_metadata.value.get(value),
+                StringType()
+            )
+            df = df.withColumn("statecodename", state_metadata_udf(col("statecode")))
+            self.logger.info("Field created: statecodename")
         return df
+
+    def convert_to_timestamp(self, df, timestamp_list):
+        """
+        Add metadata related to state codes to the DataFrame.
+        Args:
+            df (DataFrame): The DataFrame to which metadata will be added.
+            timestamp_list (dict): List of field with timestamp datatype.
+        Returns:
+            DataFrame: The DataFrame with standardized timestamp.
+        """
+        convert_to_timestamp_udf = udf(
+            lambda value: parse(value) if value is not None else None,
+                TimestampType()
+        )
+        for field in timestamp_list:
+            df = df.withColumn(field, convert_to_timestamp_udf(col(field)))
+            self.logger.info("Field %s updated to timestamp", field)
+        return df
+
 
     def audit_log_and_partition(self, df):
         """
@@ -256,18 +284,23 @@ class DataIngestion:
         """
         Main function to execute the data ingestion pipeline.
         """
-        latest_files = self.get_latest_files()
-        schema = self.get_schema()
-        additional_data = self.get_additional_data()
-        df = spark.read.option("delimiter", ",")\
-                    .option("multiline","true")\
-                    .option("escape", '"' )\
-                .csv(latest_files, header=False, schema=schema)
-        df = self.option_set_metadata(df, additional_data["GlobalOptionSetMetadata"])
-        df = self.option_set_metadata(df, additional_data["OptionSetMetadata"])
-        df = self.status_metadata(df, additional_data["StatusMetadata"])
-        df = self.state_metadata(df, additional_data["StateMetadata"])
-        df = self.audit_log_and_partition(df)
-        self.write_parquet(df)
-        self.logger.info("Job Done")
+        try:
+            self.logger.info("Process table: %s", self.table_name)
+            latest_files = self.get_latest_files()
+            schema, timestamp_list = self.get_schema()
+            additional_data = self.get_additional_data()
+            df = spark.read.option("delimiter", ",")\
+                        .option("multiline","true")\
+                        .option("escape", '"' )\
+                    .csv(latest_files, header=False, schema=schema)
+            df = self.option_set_metadata(df, additional_data.get("GlobalOptionSetMetadata"))
+            df = self.option_set_metadata(df, additional_data.get("OptionSetMetadata"))
+            df = self.status_metadata(df, additional_data.get("StatusMetadata"))
+            df = self.state_metadata(df, additional_data.get("StateMetadata"))
+            df = self.convert_to_timestamp(df, timestamp_list)
+            df = self.audit_log_and_partition(df)
+            self.write_parquet(df)
+            self.logger.info("Job Done")
+        except Exception as e:
+            self.logger.error("Error message for table %s: %s", self.table_name, e)
 
